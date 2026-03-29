@@ -1,0 +1,1640 @@
+钱包地址 0x7859887393f998d118073aeeEaA68DCb8Bf349d4
+密钥9451b31bcc927ec93f51397551693d87b3a7704a2ffb4837d8ceb57b2fcb5cfd
+合约地址0x487bb9Df042f31d28B881F0C2E65095B31a0127d
+# 🔥 Card9 Chain V6 —— 最完整版本
+
+运行环境：
+
+BNB Smart Chain Testnet
+
+底注：
+
+```
+0.00002 tBNB
+```
+
+保证金：
+
+```
+0.00018 tBNB
+```
+
+操作时间：
+
+```
+20秒 + 10秒缓冲 = 30秒不可暂停
+```
+
+---
+
+# ===============================
+
+# Card9 Chain V6 合约需求文档
+
+# ===============================
+
+---
+
+# 一、固定基础参数
+
+```solidity
+BASE_BET = 0.00002 ether
+GUARANTEE = 0.00018 ether
+SERVICE_FEE_RATE = 2%
+DRAW_PROTOCOL_FEE = 0.00003 ether
+OPERATION_TIME = 20
+BUFFER_TIME = 10
+TOTAL_TIME = 30
+```
+
+---
+
+# 二、状态机
+
+CREATED
+MATCHED
+FUNDED
+DEALT
+COUNTDOWN
+SETTLED
+
+SETTLED 后所有外部函数 revert。
+
+---
+
+# 三、牌池系统（不可修改）
+
+## 3.1 固定 52 张
+
+每张牌结构：
+
+```solidity
+struct Card {
+    uint8 rank;   //1-13
+    uint8 suit;   //0-3
+}
+```
+
+点数映射：
+
+| 牌    | 点数 |
+| ---- | -- |
+| A–10 | 原值 |
+| J    | 12 |
+| Q    | 17 |
+| K    | 20 |
+
+花色优先级：
+
+```
+3 = ♠
+2 = ♥
+1 = ♣
+0 = ♦
+```
+
+---
+
+# 四、发牌机制
+
+* 区块随机 + blockhash
+* 抽 4 张给 P1
+* 抽 4 张给 P2
+* 不重复
+* 来自牌池
+
+生成：
+
+```
+playerHash = keccak256(abi.encode(cards))
+```
+
+---
+
+# 五、哈希验证机制
+
+结算时：
+
+```
+submittedHash == storedHash
+```
+
+否则作弊。
+
+---
+
+# 六、牌型判断（完整展开）
+
+## 6.1 王炸
+
+四张 rank 相同。
+
+返回：
+
+```
+type = 4
+weight = rank
+```
+
+---
+
+## 6.2 顺子
+
+条件：
+
+* 四张牌 rank 连续
+* 不允许循环（K-A-2-3 禁止）
+* 必须严格递增或递减
+
+排序后判断：
+
+```
+r0,r1,r2,r3
+r1=r0+1
+r2=r1+1
+r3=r2+1
+```
+
+返回：
+
+```
+type = 3
+weight = 最大rank
+```
+
+---
+
+## 6.3 豹子
+
+任意两张 rank 相同。
+
+若有多个对子：
+
+取最大 rank 对子。
+
+返回：
+
+```
+type = 2
+weight = pairRank
+```
+
+---
+
+## 6.4 普通牌
+
+计算：
+
+1. 最大单牌
+2. 十位数 (rank/10)
+3. 尾数 (rank%10)
+4. 花色
+
+比较顺序：
+
+```
+尾数 → 十位 → 最大单牌 → 花色
+```
+
+返回：
+
+```
+type = 1
+weightComposite
+```
+
+---
+
+# 七、组内比较逻辑
+
+```solidity
+compareGroup(groupA, groupB)
+```
+
+先比较：
+
+1. type
+2. weight
+3. 花色
+
+返回：
+
+```
+1 = A胜
+0 = B胜
+```
+
+---
+
+# 八、大小组定义（强制链上）
+
+执行：
+
+```
+if compare(A,B) == 1
+   big = A
+   small = B
+else
+   big = B
+   small = A
+```
+
+---
+
+# 九、双方对比
+
+执行两次：
+
+1. P1.big vs P2.big
+2. P1.small vs P2.small
+
+得到：
+
+```
+bigWin
+smallWin
+```
+
+---
+
+# 十、最终胜负逻辑
+
+```
+if (bigWin && smallWin) WIN
+else if (!bigWin && !smallWin) LOSE
+else DRAW
+```
+
+---
+
+# 十一、倍率判定规则（完整）
+
+倍率由：
+
+双方最高牌型中更高者决定。
+
+| 最高牌型 | 倍率 |
+| ---- | -- |
+| 普通   | 1x |
+| 豹子   | 5x |
+| 顺子   | 9x |
+| 王炸   | 9x |
+
+---
+
+# 十二、资金规则（完整精确）
+
+## 普通
+
+赢家获得：
+
+```
+BASE_BET
+```
+
+输家损失：
+
+```
+BASE_BET
+```
+
+保证金返还：
+
+```
+GUARANTEE - BASE_BET
+```
+
+---
+
+## 豹子
+
+赢家：
+
+```
+BASE_BET ×5
+```
+
+输家：
+
+```
+BASE_BET ×5
+```
+
+保证金返还：
+
+```
+GUARANTEE - BASE_BET×5
+```
+
+---
+
+## 顺子 / 王炸
+
+赢家：
+
+```
+BASE_BET ×9
+```
+
+输家：
+
+```
+GUARANTEE 全部扣光
+```
+
+---
+
+# 十三、服务费
+
+```
+fee = winAmount ×2%
+```
+
+赢家到账：
+
+```
+winAmount - fee
+```
+
+---
+
+# 十四、平局
+
+双方：
+
+* 退还保证金
+* 各支付 DRAW_PROTOCOL_FEE
+
+---
+
+# 十五、作弊处理
+
+单方作弊：
+
+* 直接判输
+* 输掉底注
+* 剩余保证金给开发者
+
+双方作弊：
+
+* 双方保证金全没收
+* 转开发者
+
+---
+
+# 十六、Settlement顺序（最终版）
+
+1. require COUNTDOWN
+2. state=SETTLED
+3. 判断认输
+4. 判断作弊
+5. 验证哈希
+6. 验证合法牌
+7. 验证不重复
+8. 比较大小组
+9. 双组对比
+10. 判定胜负
+11. 计算倍率
+12. 计算服务费
+13. 划拨资金
+14. 返还保证金
+# 🔥 Card9 Chain V6 —— 最完整前端需求文档
+
+---
+
+# 一、前端核心原则（强制）
+
+前端绝对不能：
+
+* ❌ 判断胜负
+* ❌ 判断牌型
+* ❌ 计算倍率
+* ❌ 控制时间逻辑
+* ❌ 生成随机牌
+* ❌ 修改牌顺序
+* ❌ 参与结算
+
+前端只负责：
+
+* ✅ 钱包连接
+* ✅ 调用合约
+* ✅ 展示状态
+* ✅ 分组UI
+* ✅ 自动提交
+* ✅ 显示结果
+
+---
+
+# 二、钱包连接模块（避免“创建匹配失败”）
+
+## 2.1 必须检测是否安装钱包
+
+```js
+if (!window.ethereum) {
+   show("请安装 MetaMask");
+   return;
+}
+```
+
+---
+
+## 2.2 强制请求账户
+
+```js
+await ethereum.request({
+  method: 'eth_requestAccounts'
+});
+```
+
+---
+
+## 2.3 强制检查网络
+
+必须是：
+
+```
+chainId = 0x61
+```
+
+```js
+const chainId = await ethereum.request({
+  method: 'eth_chainId'
+});
+
+if (chainId !== '0x61') {
+   await ethereum.request({
+     method: 'wallet_switchEthereumChain',
+     params: [{ chainId: '0x61' }]
+   });
+}
+```
+
+如果切换失败：
+
+提示：
+
+> 请手动切换到 BSC Testnet
+
+---
+
+# 三、合约初始化（必须严格）
+
+```js
+const provider = new ethers.BrowserProvider(window.ethereum);
+const signer = await provider.getSigner();
+const contract = new ethers.Contract(
+   CONTRACT_ADDRESS,
+   ABI,
+   signer
+);
+```
+
+必须打印：
+
+```js
+console.log(await signer.getAddress());
+console.log(contract.target);
+```
+
+确认：
+
+* 地址正确
+* ABI 最新
+* 网络正确
+
+---
+
+# 四、创建匹配流程（重点防失败）
+
+创建匹配失败 90% 原因：
+
+1. 未传 value
+2. value 不等于 0.00018
+3. 网络错误
+4. 余额不足
+5. ABI 不匹配
+6. 用户拒绝签名
+
+---
+
+## 4.1 创建匹配正确调用方式
+
+```js
+try {
+   const tx = await contract.createMatch({
+      value: ethers.parseEther("0.00018")
+   });
+
+   showLoading("创建匹配中...");
+   await tx.wait();
+
+   showSuccess("匹配创建成功");
+
+} catch (error) {
+   console.log(error);
+
+   if (error.code === 4001) {
+       show("用户取消交易");
+   } else if (error.message.includes("insufficient funds")) {
+       show("余额不足");
+   } else {
+       show("创建匹配失败");
+   }
+}
+```
+
+---
+
+# 五、余额检测（提前防失败）
+
+创建前必须检测：
+
+```js
+const balance = await provider.getBalance(user);
+if (balance < ethers.parseEther("0.00018")) {
+   show("余额不足");
+   return;
+}
+```
+
+---
+
+# 六、匹配状态监听
+
+前端必须监听：
+
+```js
+contract.on("MatchCreated", ...)
+contract.on("MatchFunded", ...)
+contract.on("CardsDealt", ...)
+contract.on("MatchSettled", ...)
+```
+
+UI根据状态跳转：
+
+CREATED → MATCHED → FUNDED → DEALT → COUNTDOWN → SETTLED
+
+---
+
+# 七、发牌展示逻辑
+
+收到链上事件：
+
+```js
+CardsDealt(player, cards)
+```
+
+前端：
+
+* 展示4张牌
+* 保存原始顺序
+* 保存 storedHash
+
+---
+
+# 八、倒计时系统（严格30秒）
+
+* 20秒操作
+* 10秒红色缓冲
+* 不可暂停
+* 不可刷新恢复时间
+
+使用：
+
+```js
+setInterval()
+```
+
+30秒后自动：
+
+```js
+submitOriginalCards()
+```
+
+---
+
+# 九、摆牌UI规则
+
+允许：
+
+* 拖拽分组
+* A组 0,1
+* B组 2,3
+
+禁止：
+
+* 修改牌
+* 替换牌
+* 删除牌
+* 增加牌
+
+---
+
+# 十、自动提交机制
+
+30秒后：
+
+```js
+await contract.submitCards(originalCards);
+```
+
+不判负。
+
+---
+
+# 十一、哈希异常提示
+
+如果合约返回：
+
+```
+HashMismatch
+```
+
+前端显示：
+
+> 牌数据异常，保证金将被扣除
+
+---
+
+# 十二、认输按钮逻辑（完整）
+
+## 弹窗内容：
+
+“认输将输掉底注，是否确认？”
+
+### 点击取消：
+
+关闭弹窗
+
+### 点击认输：
+
+```js
+await contract.surrender();
+```
+
+---
+
+# 十三、结果页展示
+
+必须显示：
+
+* 双方牌型
+* 大组对比
+* 小组对比
+* 倍率
+* 赢额
+* 服务费
+* 保证金返还
+* 实际到账
+
+---
+
+# 十四、错误处理总表
+
+| 错误                 | 前端提示  |
+| ------------------ | ----- |
+| 4001               | 用户取消  |
+| insufficient funds | 余额不足  |
+| wrong chain        | 切换网络  |
+| execution reverted | 合约拒绝  |
+| gas error          | Gas不足 |
+
+---
+
+# 十五、Gas估算防失败
+
+创建匹配前：
+
+```js
+await contract.createMatch.estimateGas({
+   value: ethers.parseEther("0.00018")
+});
+```
+
+若估算失败 → 直接提示。
+
+---
+
+# 十六、防止重复点击
+
+创建匹配按钮：
+
+* 点击后 disable
+* 交易确认后恢复
+
+---
+
+# 十七、页面刷新恢复
+
+刷新时：
+
+```js
+contract.getMatchState(user)
+```
+
+自动恢复 UI 状态。
+
+---
+
+# 十八、极端网络延迟处理
+
+* 允许缓冲10秒
+* 30秒后自动提交
+* 不等待无限时间
+* 不因为延迟判负
+
+---
+
+# 十九、资金展示模块
+
+实时显示：
+
+* 当前冻结金额
+* 当前风险
+* 当前最大收益
+
+---
+
+# 二十、前端最终检查清单
+
+创建匹配前必须确认：
+
+✔ 钱包已连接
+✔ chainId = 0x61
+✔ ABI 最新
+✔ 地址正确
+✔ 余额 ≥ 0.00018
+✔ 传入 value 正确
+✔ Gas 估算成功
+
+按高级赌场风格，前端需求文档以及我上传的图片编写前端并连接到智能合约，，# 🔥 Card9 Chain V6 —— 最完整前端需求文档
+
+---
+
+# 一、前端核心原则（强制）
+
+前端绝对不能：
+
+* ❌ 判断胜负
+* ❌ 判断牌型
+* ❌ 计算倍率
+* ❌ 控制时间逻辑
+* ❌ 生成随机牌
+* ❌ 修改牌顺序
+* ❌ 参与结算
+
+前端只负责：
+
+* ✅ 钱包连接
+* ✅ 调用合约
+* ✅ 展示状态
+* ✅ 分组UI
+* ✅ 自动提交
+* ✅ 显示结果
+
+---
+
+# 二、钱包连接模块（避免“创建匹配失败”）
+
+## 2.1 必须检测是否安装钱包
+
+```js
+if (!window.ethereum) {
+   show("请安装 MetaMask");
+   return;
+}
+```
+
+---
+
+## 2.2 强制请求账户
+
+```js
+await ethereum.request({
+  method: 'eth_requestAccounts'
+});
+```
+
+---
+
+## 2.3 强制检查网络
+
+必须是：
+
+```
+chainId = 0x61
+```
+
+```js
+const chainId = await ethereum.request({
+  method: 'eth_chainId'
+});
+
+if (chainId !== '0x61') {
+   await ethereum.request({
+     method: 'wallet_switchEthereumChain',
+     params: [{ chainId: '0x61' }]
+   });
+}
+```
+
+如果切换失败：
+
+提示：
+
+> 请手动切换到 BSC Testnet
+
+---
+
+# 三、合约初始化（必须严格）
+
+```js
+const provider = new ethers.BrowserProvider(window.ethereum);
+const signer = await provider.getSigner();
+const contract = new ethers.Contract(
+   CONTRACT_ADDRESS,
+   ABI,
+   signer
+);
+```
+
+必须打印：
+
+```js
+console.log(await signer.getAddress());
+console.log(contract.target);
+```
+
+确认：
+
+* 地址正确
+* ABI 最新
+* 网络正确
+
+---
+
+# 四、创建匹配流程（重点防失败）
+
+创建匹配失败 90% 原因：
+
+1. 未传 value
+2. value 不等于 0.00018
+3. 网络错误
+4. 余额不足
+5. ABI 不匹配
+6. 用户拒绝签名
+
+---
+
+## 4.1 创建匹配正确调用方式
+
+```js
+try {
+   const tx = await contract.createMatch({
+      value: ethers.parseEther("0.00018")
+   });
+
+   showLoading("创建匹配中...");
+   await tx.wait();
+
+   showSuccess("匹配创建成功");
+
+} catch (error) {
+   console.log(error);
+
+   if (error.code === 4001) {
+       show("用户取消交易");
+   } else if (error.message.includes("insufficient funds")) {
+       show("余额不足");
+   } else {
+       show("创建匹配失败");
+   }
+}
+```
+
+---
+
+# 五、余额检测（提前防失败）
+
+创建前必须检测：
+
+```js
+const balance = await provider.getBalance(user);
+if (balance < ethers.parseEther("0.00018")) {
+   show("余额不足");
+   return;
+}
+```
+
+---
+
+# 六、匹配状态监听
+
+前端必须监听：
+
+```js
+contract.on("MatchCreated", ...)
+contract.on("MatchFunded", ...)
+contract.on("CardsDealt", ...)
+contract.on("MatchSettled", ...)
+```
+
+UI根据状态跳转：
+
+CREATED → MATCHED → FUNDED → DEALT → COUNTDOWN → SETTLED
+
+---
+
+# 七、发牌展示逻辑
+
+收到链上事件：
+
+```js
+CardsDealt(player, cards)
+```
+
+前端：
+
+* 展示4张牌
+* 保存原始顺序
+* 保存 storedHash
+
+---
+
+# 八、倒计时系统（严格30秒）
+
+* 20秒操作
+* 10秒红色缓冲
+* 不可暂停
+* 不可刷新恢复时间
+
+使用：
+
+```js
+setInterval()
+```
+
+30秒后自动：
+
+```js
+submitOriginalCards()
+```
+
+---
+
+# 九、摆牌UI规则
+
+允许：
+
+* 拖拽分组
+* A组 0,1
+* B组 2,3
+
+禁止：
+
+* 修改牌
+* 替换牌
+* 删除牌
+* 增加牌
+
+---
+
+# 十、自动提交机制
+
+30秒后：
+
+```js
+await contract.submitCards(originalCards);
+```
+
+不判负。
+
+---
+
+# 十一、哈希异常提示
+
+如果合约返回：
+
+```
+HashMismatch
+```
+
+前端显示：
+
+> 牌数据异常，保证金将被扣除
+
+---
+
+# 十二、认输按钮逻辑（完整）
+
+## 弹窗内容：
+
+“认输将输掉底注，是否确认？”
+
+### 点击取消：
+
+关闭弹窗
+
+### 点击认输：
+
+```js
+await contract.surrender();
+```
+
+---
+
+# 十三、结果页展示
+
+必须显示：
+
+* 双方牌型
+* 大组对比
+* 小组对比
+* 倍率
+* 赢额
+* 服务费
+* 保证金返还
+* 实际到账
+
+---
+
+# 十四、错误处理总表
+
+| 错误                 | 前端提示  |
+| ------------------ | ----- |
+| 4001               | 用户取消  |
+| insufficient funds | 余额不足  |
+| wrong chain        | 切换网络  |
+| execution reverted | 合约拒绝  |
+| gas error          | Gas不足 |
+
+---
+
+# 十五、Gas估算防失败
+
+创建匹配前：
+
+```js
+await contract.createMatch.estimateGas({
+   value: ethers.parseEther("0.00018")
+});
+```
+
+若估算失败 → 直接提示。
+
+---
+
+# 十六、防止重复点击
+
+创建匹配按钮：
+
+* 点击后 disable
+* 交易确认后恢复
+
+---
+
+# 十七、页面刷新恢复
+
+刷新时：
+
+```js
+contract.getMatchState(user)
+```
+
+自动恢复 UI 状态。
+
+---
+
+# 十八、极端网络延迟处理
+
+* 允许缓冲10秒
+* 30秒后自动提交
+* 不等待无限时间
+* 不因为延迟判负
+
+---
+
+# 十九、资金展示模块
+
+实时显示：
+
+* 当前冻结金额
+* 当前风险
+* 当前最大收益
+
+---
+
+# 二十、前端最终检查清单
+
+创建匹配前必须确认：
+
+✔ 钱包已连接
+✔ chainId = 0x61
+✔ ABI 最新
+✔ 地址正确
+✔ 余额 ≥ 0.00018
+✔ 传入 value 正确
+✔ Gas 估算成功
+
+不要用 npm run dev 直接部署了开发服务器
+
+因为开发服务器默认带 eval。
+
+✅ 正确上线流程
+npm run build
+
+然后：
+
+部署 dist 文件夹
+
+不使用开发模式
+
+不用热更新点击进入房间按键，做一个弹窗实现内容
+
+1. 前端匹配逻辑
+
+30秒匹配倒计时：明确的匹配时间限制
+
+取消匹配按钮：玩家可以随时取消匹配
+
+匹配状态显示：实时显示匹配进度和倒计时
+
+智能匹配逻辑：只有匹配成功后才调用合约
+
+2. 界面设计
+
+匹配状态UI：显示"等待匹配中..."状态
+
+倒计时显示：大号字体显示剩余时间
+
+取消按钮：醒目的红色取消按钮
+
+状态反馈：匹配成功/失败的明确提示
+
+3. 错误处理
+
+网络问题处理：玩家可以立即取消匹配
+
+超时处理：30秒后自动取消匹配
+
+匹配失败提示：显示"没有对手，匹配失败"
+
+交易取消处理：用户取消交易时的友好提示
+
+
+
+前端 (Next.js)
+        ↓
+Supabase Realtime 匹配服务器
+        ↓
+双方Ready确认
+        ↓
+同时调用合约 startMatch()
+        ↓
+链上冻结保证金
+        ↓
+发牌 → 20s操作 → 10s缓冲 → 结算
+```
+
+
+# 一、 核心原则（解决锁仓）
+
+
+
+### 质押必须“双人同时进入”
+
+### 匹配阶段完全链下
+
+---
+
+# 二、状态机设计
+
+## Supabase 服务器状态
+
+```
+IDLE
+MATCHING
+MATCHED
+READY_P1
+READY_P2
+READY_BOTH
+ONCHAIN_PENDING
+ONCHAIN_STARTED
+```
+
+---
+
+## 链上状态
+
+```
+CREATED
+FUNDED
+DEALT
+COUNTDOWN
+SETTLED
+CANCELLED
+```
+
+---
+
+# 三、防锁仓核心机制
+
+## 🔥 机制1：链下匹配
+
+Supabase 负责：
+
+* 钱包地址登记
+* 实时匹配
+* 广播给双方
+
+不涉及资金。
+
+---
+
+## 🔥 机制2：双Ready签名
+
+匹配成功后：
+
+双方必须点击：
+
+```
+[Ready]
+```
+
+签名一段 message：
+
+```
+I confirm to start Card9 match #123
+```
+
+这是离链签名，不消耗Gas。
+
+---
+
+## 🔥 机制3：双签名完成才允许链上启动
+
+Supabase 检测：
+
+```
+if (player1_ready && player2_ready)
+```
+
+前端才显示：
+
+```
+[Start On Chain]
+```
+
+---
+
+## 🔥 机制4：链上启动函数必须包含两个地址
+
+```solidity
+function startMatch(address p1, address p2) external payable
+```
+
+要求：
+
+```solidity
+require(msg.value == baseStake * 2);
+```
+
+必须一次性带入双人保证金。
+
+---
+
+# 四、防锁仓逻辑
+
+## 如果第二人不Ready
+
+Supabase：
+
+```
+5分钟自动清理
+```
+
+没有任何链上操作
+没有Gas
+没有锁仓
+
+---
+
+## 如果一个人Ready后断网
+
+Supabase：
+
+```
+ready过期时间 60秒
+```
+
+自动回到 MATCHING
+
+---
+
+# 五、链上防锁仓机制（最终保险）
+
+## startMatch 之后
+
+增加：
+
+```solidity
+uint public fundDeadline;
+```
+
+---
+
+### 如果链上FUNDED后异常
+
+例如：
+
+* 前端崩溃
+* 不进入发牌
+
+可以增加：
+
+```solidity
+function emergencyCancel(uint matchId)
+```
+
+条件：
+
+```solidity
+require(block.timestamp > fundDeadline);
+```
+
+退还双方保证金。
+
+---
+
+# 六、Supabase 架构设计
+
+## 1️⃣ 创建项目
+
+登录：
+
+[https://supabase.com](https://supabase.com)
+
+创建：
+
+```
+card9
+```
+
+---
+
+## 2️⃣ 建立数据库表
+
+### matches 表
+
+```sql
+create table matches (
+  id uuid primary key default uuid_generate_v4(),
+  player1 text,
+  player2 text,
+  status text,
+  player1_ready boolean default false,
+  player2_ready boolean default false,
+  created_at timestamp default now()
+);
+```
+
+---
+
+### queue 表
+
+```sql
+create table queue (
+  wallet text primary key,
+  joined_at timestamp default now()
+);
+```
+
+---
+
+## 3️⃣ 启用 Realtime
+
+Dashboard：
+
+```
+Database → Replication
+```
+
+开启：
+
+```
+queue
+matches
+```
+
+---
+
+## 4️⃣ 前端连接 Supabase
+
+安装：
+
+```bash
+npm install @supabase/supabase-js
+```
+
+---
+
+## 5️⃣ 初始化客户端
+
+```javascript
+import { createClient } from '@supabase/supabase-js'
+
+const supabase = createClient(
+  process.env.NEXT_PUBLIC_SUPABASE_URL,
+  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
+)
+```
+
+---
+
+# 七、匹配逻辑
+
+## 玩家点击匹配
+
+```javascript
+await supabase
+  .from('queue')
+  .insert({ wallet: address })
+```
+
+---
+
+## 服务器监听 queue
+
+使用 Edge Function 或监听：
+
+当 queue >= 2：
+
+```javascript
+create match
+delete from queue
+```
+
+---
+
+## 推送匹配成功
+
+Realtime 监听：
+
+```javascript
+supabase
+  .channel('match-updates')
+  .on('postgres_changes', ...)
+```
+
+---
+
+# 八、Ready 签名流程
+
+前端：
+
+```javascript
+const signature = await signer.signMessage(
+  "Confirm Card9 Match"
+)
+```
+
+保存到 Supabase：
+
+```
+player1_ready = true
+```
+
+---
+
+# 九、链上启动
+
+双方 ready 后：
+
+前端自动弹出：
+
+```
+startMatch()
+```
+
+
+两人分别发送 stake()，
+合约检测：
+
+```
+if both funded → start
+```
+
+---
+
+# 十、推荐最终安全版本
+
+### 推荐采用：
+
+```
+stake() 分开质押
+```
+
+
+
+---
+
+## stake 逻辑：
+
+```solidity
+mapping(matchId => mapping(address => bool)) funded;
+```
+
+当：
+
+```
+funded[p1] && funded[p2]
+```
+
+自动发牌。
+
+现在确定不使用Supabase，直接使用Node.js服务器匹配，你按照以上内容，给出完整可运行的前端提示词1. 前端逻辑处理：匹配失败时的回滚机制
+
+你需要确保前端有处理匹配失败的逻辑，防止错误地提交交易。推荐的做法是：
+
+1.1 检查匹配池
+
+当发起匹配时，前端必须：
+
+确认匹配请求成功并且已经有对手进入匹配池。
+
+如果对手没有加入匹配池，则不允许发起合约交易。
+
+前端可以进行检查，如下：
+
+async function matchPlayers() {
+  try {
+    const matchStatus = await contract.getMatchStatus(); // 假设有此函数检查匹配池
+    if (matchStatus === 'noOpponent') {
+      show("没有对手，请稍后再试");
+      return;
+    }
+
+    // 继续创建匹配请求
+    const tx = await contract.createMatch({ value: ethers.parseEther("0.00018") });
+    await tx.wait();
+    show("匹配成功，进入对战");
+  } catch (error) {
+    console.error("匹配失败", error);
+    show("匹配失败，请稍后再试");
+  }
+}
+1.2 自动交易限制
+
+前端需要明确：
+
+如果 匹配失败，不应该触发后续的交易。
+
+自动交易请求（比如 createMatch）应该在确认匹配成功后才发起。
+
+例如，确保 不等对手 时，不触发创建交易：
+
+if (!opponentFound) {
+  // 如果没有找到对手，就不要发起交易
+  show("没有对手，无法继续");
+  return;
+}
+2. 合约优化：匹配逻辑和交易限制
+2.1 合约添加匹配确认
+
+在合约内，需要有逻辑来确认是否匹配成功，并且避免在没有对手的情况下进行交易。可以通过 require 来做这个检查：
+
+function createMatch() external payable {
+    require(matchStatus == "matched", "没有对手，无法继续匹配");
+    // 后续逻辑...
+}
+
+这样，合约会阻止交易发生，如果匹配池中没有对手时，直接 revert。
+
+2.2 添加匹配失败的回滚机制
+
+在合约中，你还可以添加一个 超时机制 或 匹配失败的回滚，如果无法匹配到对手，及时返回：
+
+uint256 public matchTimeout = block.timestamp + 30 minutes;
+
+function createMatch() external payable {
+    if (block.timestamp > matchTimeout) {
+        revert("匹配超时，重新尝试");
+    }
+    // 继续匹配逻辑...
+}
+
+这样，合约会在超时后阻止交易。
+
+3. 确保合约的同步性
+
+确保合约中的匹配状态在交易之间正确同步。如果匹配失败，合约应该撤销或回滚交易，防止意外提交。
+
+4. 增加用户提示和反馈
+
+当前端检测到无法匹配时，显示：
+
+"等待对手中，请稍等..."
+
+如果超时："没有对手匹配，无法创建匹配"
+
+显示适当的 loading 状态，避免用户点击过多次。
