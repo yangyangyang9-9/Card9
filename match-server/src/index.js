@@ -46,14 +46,25 @@ function handleWebSocketMessage(ws, message) {
       walletRegistry.registerWallet(ws, wallet);
       break;
     case 'join_queue':
-      matchManager.joinQueue(wallet);
+      const jwWallet = wallet || walletRegistry.getWallet(ws);
+      if (jwWallet) {
+        matchManager.joinQueue(jwWallet);
+      } else {
+        console.log('join_queue失败: 钱包未注册');
+      }
       break;
     case 'leave_queue':
-      matchManager.leaveQueue(wallet);
+      const lwWallet = wallet || walletRegistry.getWallet(ws);
+      if (lwWallet) {
+        matchManager.leaveQueue(lwWallet);
+      }
       break;
     case 'ready':
       if (matchId) {
-        matchManager.markReady(matchId, wallet);
+        const rWallet = wallet || walletRegistry.getWallet(ws);
+        if (rWallet) {
+          matchManager.markReady(matchId, rWallet);
+        }
       }
       break;
     default:

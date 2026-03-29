@@ -10,38 +10,40 @@ class MatchManager {
   }
 
   joinQueue(wallet) {
-    const ws = this.walletRegistry.getConnection(wallet);
+    const normalizedWallet = wallet.toLowerCase();
+    const ws = this.walletRegistry.getConnection(normalizedWallet);
     if (!ws) {
-      console.log(`钱包 ${wallet} 未连接WebSocket`);
+      console.log(`钱包 ${normalizedWallet} 未连接WebSocket`);
       return null;
     }
 
-    if (this.isInQueue(wallet)) {
-      console.log(`钱包 ${wallet} 已在队列中`);
-      return this.getQueuePosition(wallet);
+    if (this.isInQueue(normalizedWallet)) {
+      console.log(`钱包 ${normalizedWallet} 已在队列中`);
+      return this.getQueuePosition(normalizedWallet);
     }
 
-    const existingMatch = this.playerToMatch.get(wallet);
+    const existingMatch = this.playerToMatch.get(normalizedWallet);
     if (existingMatch) {
-      console.log(`钱包 ${wallet} 已在匹配 ${existingMatch} 中`);
+      console.log(`钱包 ${normalizedWallet} 已在匹配 ${existingMatch} 中`);
       return existingMatch;
     }
 
-    this.queue.push(wallet);
-    console.log(`钱包 ${wallet} 加入匹配队列，当前队列长度: ${this.queue.length}`);
+    this.queue.push(normalizedWallet);
+    console.log(`钱包 ${normalizedWallet} 加入匹配队列，当前队列长度: ${this.queue.length}`);
 
     if (this.queue.length >= 2) {
       return this.createMatch();
     }
 
-    return this.getQueuePosition(wallet);
+    return this.getQueuePosition(normalizedWallet);
   }
 
   leaveQueue(wallet) {
-    const index = this.queue.indexOf(wallet);
+    const normalizedWallet = wallet.toLowerCase();
+    const index = this.queue.indexOf(normalizedWallet);
     if (index !== -1) {
       this.queue.splice(index, 1);
-      console.log(`钱包 ${wallet} 离开匹配队列`);
+      console.log(`钱包 ${normalizedWallet} 离开匹配队列`);
       return true;
     }
     return false;
@@ -55,6 +57,9 @@ class MatchManager {
     const player1 = this.queue.shift();
     const player2 = this.queue.shift();
 
+    console.log(`[createMatch] player1=${player1}, player2=${player2}`);
+    console.log(`[createMatch] queue now length=${this.queue.length}`);
+
     const matchId = uuidv4();
     const match = new Match(matchId, player1, player2);
 
@@ -63,6 +68,7 @@ class MatchManager {
     this.playerToMatch.set(player2, matchId);
 
     console.log(`创建匹配 ${matchId}: ${player1} vs ${player2}`);
+    console.log(`[playerToMatch] keys:`, Array.from(this.playerToMatch.keys()));
 
     this.notifyMatchCreated(match);
 
@@ -168,7 +174,8 @@ class MatchManager {
   }
 
   getMatchByWallet(wallet) {
-    const matchId = this.playerToMatch.get(wallet);
+    const normalizedWallet = wallet.toLowerCase();
+    const matchId = this.playerToMatch.get(normalizedWallet);
     if (matchId) {
       return this.matches.get(matchId);
     }
@@ -223,11 +230,13 @@ class MatchManager {
   }
 
   isInQueue(wallet) {
-    return this.queue.includes(wallet);
+    const normalizedWallet = wallet.toLowerCase();
+    return this.queue.includes(normalizedWallet);
   }
 
   getQueuePosition(wallet) {
-    const index = this.queue.indexOf(wallet);
+    const normalizedWallet = wallet.toLowerCase();
+    const index = this.queue.indexOf(normalizedWallet);
     return index !== -1 ? index + 1 : null;
   }
 
