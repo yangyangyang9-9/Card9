@@ -1,5 +1,6 @@
 const express = require('express');
 const { MatchStatus } = require('../match/Match');
+const ethers = require('ethers');
 
 function setupRoutes(matchManager, walletRegistry) {
   const router = express.Router();
@@ -36,7 +37,10 @@ function setupRoutes(matchManager, walletRegistry) {
     }
 
     const result = matchManager.joinQueue(wallet);
-    res.json({ success: true, result });
+    if (!result.success) {
+      return res.status(400).json(result);
+    }
+    res.json(result);
   });
 
   router.post('/queue/leave', (req, res) => {
@@ -65,6 +69,35 @@ function setupRoutes(matchManager, walletRegistry) {
       return res.status(404).json({ error: 'no_active_match' });
     }
     res.json(match.toJSON());
+  });
+
+  router.get('/match/wallet/:wallet/state', (req, res) => {
+    const { wallet } = req.params;
+    const state = matchManager.getMatchState(wallet);
+    res.json(state);
+  });
+
+  router.get('/match/wallet/:wallet/precheck', (req, res) => {
+    const { wallet } = req.params;
+    const state = matchManager.getMatchState(wallet);
+
+    const MATCH_FEE = '0.00018';
+    const REQUIRED_BALANCE = ethers.BigNumber.from(ethers.parseEther(MATCH_FEE));
+
+    const result = {
+      canJoinMatch: !state.inQueue && !state.matched,
+      canStartOnChain: state.canStartOnChain,
+      opponentFound: state.matched,
+      matchReady: state.status === MatchStatus.READY_BOTH,
+      requirements: {
+        matchFee: MATCH_FEE,
+        estimatedGas: '0.0001',
+        totalRequired: String(parseFloat(MATCH_FEE) + 0.0001)
+      },
+      currentState: state
+    };
+
+    res.json(result);
   });
 
   router.post('/match/:matchId/ready', (req, res) => {

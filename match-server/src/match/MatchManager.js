@@ -14,28 +14,69 @@ class MatchManager {
     const ws = this.walletRegistry.getConnection(normalizedWallet);
     if (!ws) {
       console.log(`钱包 ${normalizedWallet} 未连接WebSocket`);
-      return null;
+      return { success: false, error: 'wallet_not_connected' };
     }
 
     if (this.isInQueue(normalizedWallet)) {
       console.log(`钱包 ${normalizedWallet} 已在队列中`);
-      return this.getQueuePosition(normalizedWallet);
+      return {
+        success: true,
+        matched: false,
+        status: 'waiting',
+        position: this.getQueuePosition(normalizedWallet),
+        message: '等待对手中...'
+      };
     }
 
     const existingMatch = this.playerToMatch.get(normalizedWallet);
     if (existingMatch) {
-      console.log(`钱包 ${normalizedWallet} 已在匹配 ${existingMatch} 中`);
-      return existingMatch;
+      const match = this.matches.get(existingMatch);
+      if (match && match.status === MatchStatus.READY_BOTH) {
+        console.log(`钱包 ${normalizedWallet} 已在匹配 ${existingMatch} 中（双方已准备）`);
+        return {
+          success: true,
+          matched: true,
+          matchId: existingMatch,
+          opponent: match.getOpponent(normalizedWallet),
+          status: 'ready_to_onchain',
+          message: '已匹配成功，可以发起链上交易'
+        };
+      } else if (match) {
+        console.log(`钱包 ${normalizedWallet} 已在匹配 ${existingMatch} 中`);
+        return {
+          success: true,
+          matched: true,
+          matchId: existingMatch,
+          opponent: match.getOpponent(normalizedWallet),
+          status: 'waiting_ready',
+          message: '等待双方准备...'
+        };
+      }
     }
 
     this.queue.push(normalizedWallet);
     console.log(`钱包 ${normalizedWallet} 加入匹配队列，当前队列长度: ${this.queue.length}`);
 
     if (this.queue.length >= 2) {
-      return this.createMatch();
+      const matchId = this.createMatch();
+      const match = this.matches.get(matchId);
+      return {
+        success: true,
+        matched: true,
+        matchId: matchId,
+        opponent: match.getOpponent(normalizedWallet),
+        status: 'matched',
+        message: '匹配成功！'
+      };
     }
 
-    return this.getQueuePosition(normalizedWallet);
+    return {
+      success: true,
+      matched: false,
+      status: 'waiting',
+      position: this.getQueuePosition(normalizedWallet),
+      message: '等待对手中...'
+    };
   }
 
   leaveQueue(wallet) {
@@ -180,6 +221,52 @@ class MatchManager {
       return this.matches.get(matchId);
     }
     return null;
+  }
+
+  getMatchState(wallet) {
+    const normalizedWallet = wallet.toLowerCase();
+    const matchId = this.playerToMatch.get(normalizedWallet);
+
+    if (!matchId) {
+      if (this.isInQueue(normalizedWallet)) {
+        return {
+          inQueue: true,
+          matched: false,
+          status: 'waiting',
+          position: this.getQueuePosition(normalizedWallet),
+          queueLength: this.getQueueLength()
+        };
+      }
+      return {
+        inQueue: false,
+        matched: false,
+        status: 'idle'
+      };
+    }
+
+    const match = this.matches.get(matchId);
+    if (!match) {
+      return {
+        inQueue: false,
+        matched: false,
+        status: 'idle'
+      };
+    }
+
+    return {
+      inQueue: false,
+      matched: true,
+      matchId: match.id,
+      opponent: match.getOpponent(normalizedWallet),
+      status: match.status,
+      player1: match.player1,
+      player2: match.player2,
+      youReady: normalizedWallet === match.player1 ? match.player1Ready : match.player2Ready,
+      opponentReady: normalizedWallet === match.player1 ? match.player2Ready : match.player1Ready,
+      canStartOnChain: match.status === MatchStatus.READY_BOTH,
+      createdAt: match.createdAt,
+      readyAt: match.readyAt
+    };
   }
 
   cleanupExpiredMatches() {
